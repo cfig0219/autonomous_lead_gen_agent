@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Maps Lead Gen Agent</title>
+    
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+    
+    <style>
+        /* Global Page Background: Sets a soft, professional light-grey backdrop */
+        body { background-color: #f5f7fa; min-height: 100vh; padding: 2rem 0; }
+        
+        /* Configuration Containers: Standard white cards with a subtle shadow boundary for structural contrast */
+        .config-box { background: #fff; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        
+        /* Real-time Agent Logger Console: Mimics a Linux CLI environment with dark layout and neon-green monospace characters */
+        #logConsole { background: #1e1e1e; color: #39ff14; font-family: monospace; padding: 1rem; border-radius: 6px; height: 180px; overflow-y: auto; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <div class="container is-max-widescreen">
+        <h1 class="title is-2 has-text-centered">🗺️ Autonomous Lead Gen Agent</h1>
+        <p class="subtitle is-5 has-text-centered has-text-grey">Hosted entirely on GitHub Pages</p>
+
+        <div class="columns">
+            
+            <div class="column is-5">
+                <div class="config-box">
+                    <h3 class="title is-5">Search Configurations</h3>
+                    
+                    <div class="field">
+                        <label class="label">Central Location / Zip Code</label>
+                        <input class="input" type="text" id="targetLocation" value="10025">
+                    </div>
+                    
+                    <div class="field">
+                        <label class="label">Search Queries (One per line)</label>
+                        <textarea class="input" id="searchQueries" style="height: 120px;">Industrial automation companies&#10;Systems integrators</textarea>
+                    </div>
+                    
+                    <button class="button is-primary is-fullwidth" id="startBtn">Launch Autonomous Search</button>
+                </div>
+            </div>
+
+            <div class="column is-7">
+                
+                <div class="config-box mb-4">
+                    <h3 class="title is-5">Agent Execution Log</h3>
+                    <div id="logConsole">System idling. Waiting for inputs...</div>
+                </div>
+
+                <div class="config-box">
+                    <div class="is-flex is-justify-content-between is-align-items-center mb-3">
+                        <h3 class="title is-5 mb-0">Compiled Leads</h3>
+                        
+                        <button class="button is-small is-link" id="downloadBtn">Export to Excel/CSV</button>
+                    </div>
+                    
+                    <div style="overflow-x: auto; max-height: 400px;">
+                        <table class="table is-striped is-narrow is-hoverable is-fullwidth" id="resultsTable">
+                            <thead>
+                                <tr>
+                                    <th>Company Name</th>
+                                    <th>Phone</th>
+                                    <th>Website</th>
+                                    <th>Address</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td colspan="4" class="has-text-centered has-text-grey-light">No data gathered yet.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+        </div>
+    </div>
+
+    <script type="module">
+        
+        /**
+         * Orchestration Object Import: Pulls the multi-agent execution pipeline logic.
+         * Expects an exported class managing network requests, tokens, validation, and layout render bindings.
+         */
+        import { Search } from './Search.js';
+    
+        /**
+         * Core Application Click Listener
+         * Intercepts standard element interaction, handles async states, instantiates dependencies, and controls execution life-cycle.
+         */
+        document.getElementById('startBtn').addEventListener('click', async () => {
+            
+            /** * @var {string} location - Captures raw target string (e.g., zip code or city name) directly from DOM.
+             */
+            const location = document.getElementById('targetLocation').value;
+            
+            /** * @var {Array<string>} queries - Extracts the raw textbox search queries, parses individual lines 
+             * via split, cleans white spaces, and drops empty elements to keep from making wasteful empty API queries.
+             */
+            const queries = document.getElementById('searchQueries').value
+                .split('\n')
+                .filter(q => q.trim() !== '');
+    
+            /** * @var {HTMLElement} btn - Captures the launch button reference to apply immediate CSS visual mutations.
+             */
+            const btn = document.getElementById('startBtn');
+            
+            // UI State Mutation: Appends an animated loading ring inside the button to inform the user processing is occurring.
+            btn.classList.add('is-loading');
+            
+            // Console Update: Alerts the operator that local memory allocations and logic boots are initiating.
+            document.getElementById('logConsole').innerHTML = "Initializing agent architecture...";
+    
+            try {
+                /** * @var {Search} gMap - Creates an active processing engine instance, passing the user criteria parameters.
+                 */
+                const gMap = new Search(location, queries);
+    
+                /** * Async Operation Chain: Resolves API handshakes, coordinates location queries via Google, 
+                 * manages multi-thread data lookups, and runs data parsing using Gemini.
+                 */
+                await gMap.init();
+    
+                /**
+                 * Event Handler Attachment: Captures the CSV trigger click *only* after a valid operation occurs.
+                 * Passes the newly populated object data store downward into the transformer utility.
+                 */
+                document.getElementById('downloadBtn').onclick = function() {
+                    exportInstanceToCSV(gMap.globalLeadsCollection);
+                };
+    
+            } catch (error) {
+                // Failure Trap: Logs unforeseen operational execution breaks safely inside the root browser environment.
+                console.error("The agent encountered an operational failure:", error);
+            } finally {
+                // UI State Clean: Removes loading indicators once the workflow stops executing or encounters an error.
+                btn.classList.remove('is-loading');
+            }
+        });
+    
+        /**
+         * Function: exportInstanceToCSV
+         * Purpose: Flat data converter. Formats modern raw JavaScript object collections directly into a localized 
+         * spreadsheet format string, then mimics a client-side click event to stream the download directly into the user's OS.
+         * * @param {Array<Object>} leads - An array of parsed lead records containing structured properties like name, phone, website, and address.
+         */
+        function exportInstanceToCSV(leads) {
+            
+            // 1. Initialize the CSV text content WITHOUT the data URI prefix
+            let csvContent = "Company Name,Phone,Website,Address\n";
+            
+            // Loop through gathered elements to build compliant comma-separated strings
+            leads.forEach(lead => {
+                const row = [
+                    `"${(lead.name || '').replace(/"/g, '""')}"`,
+                    `"${lead.phone || ''}"`,
+                    `"${lead.website || ''}"`,
+                    `"${(lead.address || '').replace(/"/g, '""')}"`
+                ].join(",");
+                
+                csvContent += row + "\n";
+            });
+            
+            // 2. Create a Blob from the raw CSV string data
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            
+            // 3. Generate a temporary Object URL representing the Blob data
+            const url = URL.createObjectURL(blob);
+            
+            // 4. Create an invisible anchor tag to trigger the browser download mechanics
+            const link = document.createElement("a");
+            
+            // Assign Object URL resource onto the element
+            link.setAttribute("href", url);
+            link.setAttribute("download", "maps_agent_leads.csv");
+            
+            // Stitches element context into view frame tree structure so browser can recognize validity
+            document.body.appendChild(link);
+            
+            // Programmatically fires native OS system download process
+            link.click();
+            
+            // Garbage Collection: Clears the temporary element context structure straight out of active DOM footprint
+            document.body.removeChild(link);
+            
+            // Revoke the Object URL to free up browser memory allocations
+            URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>
