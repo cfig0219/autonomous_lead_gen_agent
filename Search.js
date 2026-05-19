@@ -379,6 +379,29 @@ export class Search {
             return [];
         }
     }
+    
+    // --- Filters out duplicate business names ---
+    processAndDeduplicate(allLeads) {
+        const shouldFilter = document.getElementById('filterDuplicates').checked;
+        
+        if (!shouldFilter) return allLeads;
+    
+        const seen = new Map();
+        
+        return allLeads.filter(lead => {
+            // Normalize name for comparison (remove whitespace/casing)
+            const name = lead.name.toLowerCase().trim();
+            
+            if (seen.has(name)) {
+                // Already added a branch of this business, skip this one
+                return false;
+            }
+            
+            // First time seeing this name, mark as seen
+            seen.set(name, true);
+            return true;
+        });
+    }
 
     // --- UI RENDERING ---
     renderTable() {
@@ -460,13 +483,20 @@ export class Search {
     
                         // Route to Gemini
                     	if (hydratedResults.length > 0) {
-                        	this.log(`Routing ${hydratedResults.length} leads to Gemini context parser...`);
-                        	const geminiBody = this.queryEngine.getGeminiPayload(hydratedResults);
-                        	const leads = await this.processLeadsWithGemini(geminiBody);
-                        	
-                        	this.globalLeadsCollection = this.globalLeadsCollection.concat(leads);
-                        	totalProcessed += leads.length;
-                        	this.renderTable();
+                    	    this.log(`Routing ${hydratedResults.length} leads to Gemini context parser...`);
+                    	    const geminiBody = this.queryEngine.getGeminiPayload(hydratedResults);
+                    	    
+                    	    // 1. Get raw leads from Gemini
+                    	    let leads = await this.processLeadsWithGemini(geminiBody);
+                    	    
+                    	    // 2. APPLY FILTERING HERE: 
+                    	    // This cleans the current batch against existing data in your collection
+                    	    const filteredNewLeads = this.processAndDeduplicate(leads);
+                    	    
+                    	    // 3. Update the collection and render
+                    	    this.globalLeadsCollection = this.globalLeadsCollection.concat(filteredNewLeads);
+                    	    totalProcessed += filteredNewLeads.length;
+                    	    this.renderTable();
                     	}
     
                     } else {

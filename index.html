@@ -39,6 +39,13 @@
                         <textarea class="input" id="searchQueries" style="height: 120px;">Industrial automation companies&#10;Systems integrators</textarea>
                     </div>
                     
+                    <div class="field mt-4">
+                        <label class="checkbox">
+                            <input type="checkbox" id="filterDuplicates" checked>
+                            Filter duplicate business names (keep closest only)
+                        </label>
+                    </div>
+                    
                     <button class="button is-primary is-fullwidth" id="startBtn">Launch Autonomous Search</button>
                 </div>
             </div>
@@ -51,10 +58,12 @@
                 </div>
 
                 <div class="config-box">
-                    <div class="is-flex is-justify-content-between is-align-items-center mb-3">
-                        <h3 class="title is-5 mb-0">Compiled Leads</h3>
+                    <div class="mb-3">
+                        <h3 class="title is-5 mb-2">Compiled Leads</h3>
                         
-                        <button class="button is-small is-link" id="downloadBtn">Export to Excel/CSV</button>
+                        <button class="button is-small is-link" id="downloadBtn">
+                            Export to Excel/CSV
+                        </button>
                     </div>
                     
                     <div style="overflow-x: auto; max-height: 400px;">
@@ -91,6 +100,10 @@
          * Intercepts standard element interaction, handles async states, instantiates dependencies, and controls execution life-cycle.
          */
         document.getElementById('startBtn').addEventListener('click', async () => {
+        
+        	// CLEAR THE UI TABLE BEFORE STARTING NEW SEARCH
+        	const tableBody = document.querySelector('#resultsTable tbody');
+        	tableBody.innerHTML = '<tr><td colspan="4" class="has-text-centered has-text-grey-light">Searching...</td></tr>';
             
             /** * @var {string} location - Captures raw target string (e.g., zip code or city name) directly from DOM.
              */
