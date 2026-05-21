@@ -31,12 +31,6 @@ import { Query } from './Query.js';
  * loadGoogleMapsSDK()
  *   └─ Dynamically load Google Maps SDK from CDN
  * 
- * getPlaceDetails(placeId)
- *   └─ Fetch phone/website for a single place using Places getDetails() API
- * 
- * fetchPlacesData(query)
- *   └─ Search for businesses: textSearch() + getDetails() for each result
- * 
  * processLeadsWithGemini(rawPlaces)
  *   └─ Format data with Gemini AI using JSON schema
  * 
@@ -44,7 +38,7 @@ import { Query } from './Query.js';
  *   └─ Display results in HTML table
  * 
  * init()
- *   └─ Main orchestration loop: validate → load SDK → search → process → display
+ *   └─ Main orchestration loop: validate → load SDK → search → filter → process → display
  * 
  * ═══════════════════════════════════════════════════════════════════════════
  */
@@ -94,11 +88,6 @@ export class Search {
     }
 
     // --- GOOGLE MAPS SDK LOADING ---
-    /**
-     * Dynamically loads the Google Maps SDK from Google's CDN using 
-     * modern async best practices to maximize page performance.
-     * @returns {Promise<void>} Resolves when the window context is ready
-     */
     loadGoogleMapsSDK() {
         return new Promise((resolve, reject) => {
             try {
@@ -114,44 +103,36 @@ export class Search {
                     return reject('Google Maps API key not configured');
                 }
 
-                // Check if there is an existing script tag to prevent double injection
-                const existingScript = document.querySelector('script[src*="maps.googleapis.com"]');
-                if (existingScript) {
-                    if (window.google && window.google.maps) {
-                        resolve();
-                    } else {
-                        existingScript.addEventListener('load', () => resolve());
-                        existingScript.addEventListener('error', (e) => reject(e));
-                    }
-                    return;
-                }
-
-                // Global callback interceptor fired natively by Google Maps once unpacked
-                window.__googleMapsCallback__ = () => {
-                    // FIX: Deactivate the background countdown timer immediately on success
-                    if (timeout) clearTimeout(timeout); 
-                    
-                    this.log('✅ Google Maps SDK loaded successfully');
-                    resolve();
-                    delete window.__googleMapsCallback__; // Clean up window context
-                };
-
                 const script = document.createElement('script');
-                script.type = 'text/javascript';
-                script.src = `https://maps.googleapis.com/maps/api/js?key=${this.gmapsKey}&libraries=places&loading=async&callback=__googleMapsCallback__`;
+                script.src = `https://maps.googleapis.com/maps/api/js?key=${this.gmapsKey}&libraries=places`;
                 
                 // Use timeout from Query engine
-                const timeouts = this.queryEngine?.getAPITimeouts() || { textSearch: 20000 };
-                
-                // Changed to 'let' so it can be cleanly intercepted via closure scoping above
-                let timeout = setTimeout(() => {
-                    this.log('❌ Google Maps SDK load timeout (20 seconds)');
+                const timeouts = this.queryEngine?.getAPITimeouts() || { textSearch: 10000 };
+                const timeout = setTimeout(() => {
+                    this.log('❌ Google Maps SDK load timeout (10 seconds)');
                     reject('Google Maps SDK load timeout');
                 }, timeouts.textSearch);
 
+                script.onload = () => {
+                    clearTimeout(timeout);
+                    try {
+                        if (!window.google || !window.google.maps) {
+                            throw new Error('Google Maps object not found after SDK loaded');
+                        }
+                        this.log('✅ Google Maps SDK loaded successfully');
+                        resolve();
+                    } catch (err) {
+                        this.log(`❌ Google Maps validation error: ${err.message}`);
+                        reject(err.message);
+                    }
+                };
+
                 script.onerror = () => {
-                    if (timeout) clearTimeout(timeout);
-                    this.log('❌ Failed to load Google Maps SDK script asset from CDN.');
+                    clearTimeout(timeout);
+                    this.log('❌ Failed to load Google Maps SDK. Check that:');
+                    this.log('   - API key is valid');
+                    this.log('   - Google Maps API is enabled in Google Cloud Console');
+                    this.log('   - Places API is enabled in Google Cloud Console');
                     reject('Failed to load Google Maps SDK');
                 };
 
@@ -159,137 +140,6 @@ export class Search {
             } catch (err) {
                 this.log(`❌ Unexpected error loading Google Maps SDK: ${err.message}`);
                 reject(err.message);
-            }
-        });
-    }
-
-    // --- GOOGLE PLACES DETAILS API ---
-    /**
-     * Fetch phone/website for a single place using Google Places getDetails() API
-     * Uses Query.getPlaceDetailsRequest() for consistent field specification
-     */
-    async getPlaceDetails(placeId) {
-        return new Promise((resolve) => {
-            try {
-                if (!window.google || !window.google.maps || !window.google.maps.places) {
-                    return resolve(null);
-                }
-
-                const dummyDiv = document.createElement('div');
-                const service = new google.maps.places.PlacesService(dummyDiv);
-                
-                // Use Query engine to format the request
-                const request = this.queryEngine.getPlaceDetailsRequest(placeId);
-
-                // Use timeout from Query engine
-                const timeouts = this.queryEngine.getAPITimeouts();
-                const timeout = setTimeout(() => {
-                    resolve(null);
-                }, timeouts.getDetails);
-
-                service.getDetails(request, (place, status) => {
-                    clearTimeout(timeout);
-                    try {
-                        if (status === 'OK' && place) {
-                            resolve(place);
-                        } else {
-                            resolve(null);
-                        }
-                    } catch (err) {
-                        resolve(null);
-                    }
-                });
-            } catch (err) {
-                resolve(null);
-            }
-        });
-    }
-
-    // --- GOOGLE PLACES API CALLS ---
-    /**
-     * Search for businesses and fetch complete details (2-step process)
-     * Uses Query.getGoogleMapsRequests() for query formatting
-     */
-    async fetchPlacesData(query) {
-        return new Promise((resolve) => {
-            try {
-                // Validate using Query engine
-                const validation = this.queryEngine.validateAPIConfiguration();
-                if (!validation.isValid) {
-                    this.log(`❌ Cannot search: ${validation.errors.join(', ')}`);
-                    return resolve([]);
-                }
-
-                const dummyDiv = document.createElement('div');
-                const service = new google.maps.places.PlacesService(dummyDiv);
-                
-                // Use Query engine to format the request
-                const requests = this.queryEngine.getGoogleMapsRequests();
-                const matchedRequest = requests.find(req => req.raw === query);
-                const formattedQuery = matchedRequest ? matchedRequest.gmapsPayload : { query: `${query} in ${this.queryEngine.location}` };
-
-                // Text Search only returns basic info - we'll get details later
-                const request = {
-                    ...formattedQuery,
-                    fields: ['name', 'formatted_address', 'geometry', 'place_id']
-                };
-        
-                // Use timeout from Query engine
-                const timeouts = this.queryEngine.getAPITimeouts();
-                const timeout = setTimeout(() => {
-                    this.log(`❌ REQUEST TIMEOUT for "${query}" (${timeouts.textSearch/1000}s)`);
-                    resolve([]);
-                }, timeouts.textSearch);
-        
-                service.textSearch(request, async (results, status) => {
-                    clearTimeout(timeout);
-                    
-                    try {
-                        this.log(`📊 Status for "${query}": ${status}`);
-        
-                        const statusMap = {
-                            'INVALID_REQUEST': 'Invalid request - check query and location',
-                            'REQUEST_DENIED': 'API key is invalid or lacks permissions',
-                            'OVER_QUERY_LIMIT': 'Query limit exceeded',
-                            'NOT_FOUND': 'No results found',
-                            'ZERO_RESULTS': 'Zero results found',
-                            'OK': null
-                        };
-        
-                        if (statusMap[status]) {
-                            this.log(`❌ Places API error: ${statusMap[status]}`);
-                        } else if (status !== 'OK') {
-                            this.log(`❌ Unknown Places API status: ${status}`);
-                        }
-        
-                        if (status === 'OK' && results && results.length > 0) {
-                            this.log(`✅ Found ${results.length} results for "${query}"`);
-                            this.log(`🔍 Fetching detailed information for ${results.length} results...`);
-                            
-                            const detailedResults = [];
-                            for (let result of results) {
-                                const details = await this.getPlaceDetails(result.place_id);
-                                if (details) {
-                                    detailedResults.push(details);
-                                }
-                            }
-                            
-                            this.log(`✅ Retrieved details for ${detailedResults.length} results`);
-                            resolve(detailedResults);
-                        } else if (status === 'OK') {
-                            this.log(`⚠️ Found 0 results for "${query}"`);
-                            resolve([]);
-                        } else {
-                            resolve([]);
-                        }
-                    } catch (err) {
-                        this.log(`❌ Error processing Places response: ${err.message}`);
-                        resolve([]);
-                    }
-                });
-            } catch (err) {
-                this.log(`❌ Error searching for "${query}": ${err.message}`);
-                resolve([]);
             }
         });
     }
@@ -379,26 +229,41 @@ export class Search {
             return [];
         }
     }
-    
-    // --- Filters out duplicate business names ---
-    processAndDeduplicate(allLeads) {
+
+    // --- DEDUPLICATION & FILTERING ---
+    processAndDeduplicate(newLeads) {
         const shouldFilter = document.getElementById('filterDuplicates').checked;
         
-        if (!shouldFilter) return allLeads;
+        // If filtering is off, just pass the raw array straight through
+        if (!shouldFilter) return newLeads;
     
-        const seen = new Map();
-        
-        return allLeads.filter(lead => {
-            // Normalize name for comparison (remove whitespace/casing)
-            const name = lead.name.toLowerCase().trim();
-            
-            if (seen.has(name)) {
-                // Already added a branch of this business, skip this one
+        // Build a unique tracking set using existing items in our global storage array
+        const existingAddresses = new Set(
+            this.globalLeadsCollection.map(lead => lead.address?.toLowerCase().trim())
+        );
+        const existingNames = new Set(
+            this.globalLeadsCollection.map(lead => lead.name?.toLowerCase().trim())
+        );
+    
+        return newLeads.filter(lead => {
+            // Normalize values to prevent whitespace or capitalization bypasses
+            const cleanName = lead.name?.toLowerCase().trim();
+            const cleanAddress = lead.address?.toLowerCase().trim();
+    
+            // ❌ CRITICAL TRAP: If name AND address match an entry we already captured, dump it.
+            if (existingNames.has(cleanName) && existingAddresses.has(cleanAddress)) {
                 return false;
             }
+    
+            // If the location matches exactly, it's a duplicate entry or overlapping workspace
+            if (cleanAddress && existingAddresses.has(cleanAddress)) {
+                return false;
+            }
+    
+            // Add to our runtime sets so we catch internal duplicates within the current batch
+            if (cleanName) existingNames.add(cleanName);
+            if (cleanAddress) existingAddresses.add(cleanAddress);
             
-            // First time seeing this name, mark as seen
-            seen.set(name, true);
             return true;
         });
     }
@@ -426,7 +291,6 @@ export class Search {
     }
 
     // --- MAIN ORCHESTRATION ---
-    // Search.js -> Core Modernized Architecture Methods
     async init() {
         try {
             if (!this.queryEngine) {
@@ -435,68 +299,119 @@ export class Search {
             }
     
             this.log("Loading dynamic Google Maps environment...");
-            await this.loadGoogleMapsSDK(); // Ensure this finishes loading
+            await this.loadGoogleMapsSDK();
     
-            // Import the new Places library dynamically from the window context
+            // ════════════════════════════════════════════════════════════════
+            // NEW: Get coordinates of central location for distance filtering
+            // ════════════════════════════════════════════════════════════════
+            let centerCoordinates = null;
+            try {
+                this.log("🔍 Geocoding central location for distance filtering...");
+                centerCoordinates = await this.queryEngine.getLocationCoordinates(this.queryEngine.location);
+                this.log(`✅ Central location: ${centerCoordinates.formattedAddress}`);
+                this.log(`   Coordinates: ${centerCoordinates.lat.toFixed(4)}, ${centerCoordinates.lng.toFixed(4)}`);
+            } catch (geoErr) {
+                this.log(`⚠️ Could not geocode location: ${geoErr}`);
+                this.log('⚠️ Distance filtering disabled - using all results');
+                centerCoordinates = null;
+            }
+    
+            // Import the new Places library
             const { Place } = await google.maps.importLibrary("places");
             
             let searchRequests = this.queryEngine.getGoogleMapsRequests();
             let totalProcessed = 0;
             let totalFailed = 0;
+            let totalFiltered = 0; // NEW: Track filtered results
     
             for (let requestObj of searchRequests) {
-                this.log(`Executing Text Search (New): ${requestObj.compiledQuery}`);
+                this.log(`Executing Text Search: ${requestObj.compiledQuery}`);
                 
                 try {
-                	// Defensive array mapping to guarantee a pure, clean array primitive is passed
                 	const searchArgs = {
                     	textQuery: requestObj.gmapsPayload.textQuery,
                     	fields: Array.from(requestObj.gmapsPayload.fields) 
                 	};
                 
-                    // Execute the modern Promise-based Text Search
                 	const { places } = await Place.searchByText(searchArgs);
                     
                     if (places && places.length > 0) {
-                        this.log(`Found ${places.length} baseline candidates. Hydrating deep metadata...`);
-                        const hydratedResults = [];
+                        this.log(`✅ Found ${places.length} baseline candidates. Hydrating deep metadata...`);
+                        let hydratedResults = [];
     
                         for (let placeInstance of places) {
                             try {
-                                // FETCHFIELDS FIX: Changed 'website' to 'websiteURI'
+                                // Fetch fields including location for distance calculation
                                 await placeInstance.fetchFields({
-                                    fields: ['displayName', 'formattedAddress', 'internationalPhoneNumber', 'websiteURI']
+                                    fields: [
+                                        'displayName',
+                                        'formattedAddress',
+                                        'internationalPhoneNumber',
+                                        'websiteURI',
+                                        'location'  // NEW: Include location for distance filtering
+                                    ]
                                 });
                         
-                                // MAPPING FIX: Extract from placeInstance.websiteURI instead of placeInstance.website
                                 hydratedResults.push({
                                     name: placeInstance.displayName || 'Unknown Name',
                                     address: placeInstance.formattedAddress || 'No Address available',
                                     phone: placeInstance.internationalPhoneNumber || null,
-                                    // Assign websiteURI down to your pipeline
-                                    website: placeInstance.websiteURI || null 
+                                    website: placeInstance.websiteURI || null,
+                                    geometry: {
+                                        location: placeInstance.location  // Store location for filtering
+                                    }
                                 });
                             } catch (hydrationErr) {
-                                this.log(`⚠️ Skimming place ID due to details constraint: ${hydrationErr.message}`);
+                                this.log(`⚠️ Skipping place due to detail constraint: ${hydrationErr.message}`);
+                            }
+                        }
+
+                        // ════════════════════════════════════════════════════════════════
+                        // NEW: Apply distance filtering if coordinates are available
+                        // ════════════════════════════════════════════════════════════════
+                        if (centerCoordinates && hydratedResults.length > 0) {
+                            const maxDistance = this.queryEngine.getMaxDistanceThreshold();
+                            this.log(`🔎 Filtering results to ${maxDistance}km radius...`);
+                            
+                            const filterResult = this.queryEngine.filterPlacesByDistance(
+                                hydratedResults,
+                                centerCoordinates.lat,
+                                centerCoordinates.lng,
+                                maxDistance
+                            );
+                            
+                            hydratedResults = filterResult.filtered;
+                            totalFiltered += filterResult.removed.length;
+                            
+                            if (filterResult.removed.length > 0) {
+                                this.log(`🗑️ Filtered out ${filterResult.removed.length} results outside radius:`);
+                                filterResult.removed.slice(0, 5).forEach(r => {
+                                    this.log(`   ❌ ${r.name}: ${r.distance.toFixed(2)}km away`);
+                                });
+                                if (filterResult.removed.length > 5) {
+                                    this.log(`   ... and ${filterResult.removed.length - 5} more`);
+                                }
+                            } else {
+                                this.log(`✅ All results within ${maxDistance}km radius`);
                             }
                         }
     
                         // Route to Gemini
                     	if (hydratedResults.length > 0) {
-                    	    this.log(`Routing ${hydratedResults.length} leads to Gemini context parser...`);
-                    	    const geminiBody = this.queryEngine.getGeminiPayload(hydratedResults);
+                    	    this.log(`Routing ${hydratedResults.length} leads to Gemini...`);
                     	    
-                    	    // 1. Get raw leads from Gemini
-                    	    let leads = await this.processLeadsWithGemini(geminiBody);
-                    	    
-                    	    // 2. APPLY FILTERING HERE: 
-                    	    // This cleans the current batch against existing data in your collection
+                    	    let leads = await this.processLeadsWithGemini(hydratedResults);
                     	    const filteredNewLeads = this.processAndDeduplicate(leads);
                     	    
-                    	    // 3. Update the collection and render
                     	    this.globalLeadsCollection = this.globalLeadsCollection.concat(filteredNewLeads);
                     	    totalProcessed += filteredNewLeads.length;
                     	    this.renderTable();
+                    	} else if (centerCoordinates) {
+                    	    this.log(`⚠️ No results within ${this.queryEngine.getMaxDistanceThreshold()}km of "${requestObj.raw}"`);
+                    	    totalFailed++;
+                    	} else {
+                    	    this.log(`⚠️ No results returned for "${requestObj.raw}"`);
+                    	    totalFailed++;
                     	}
     
                     } else {
@@ -504,16 +419,19 @@ export class Search {
                         totalFailed++;
                     }
                 } catch (searchErr) {
-                    this.log(`❌ Search operational failure on query "${requestObj.raw}": ${searchErr.message}`);
+                    this.log(`❌ Search error on "${requestObj.raw}": ${searchErr.message}`);
                     totalFailed++;
                 }
             }
     
-            // Summary logger logic remains the same below...
+            // Summary with distance filtering info
             this.log(`🏁 Operation completed. Gained ${totalProcessed} leads.`);
+            if (totalFiltered > 0) {
+                this.log(`📊 Filtered out ${totalFiltered} results outside ${this.queryEngine.getMaxDistanceThreshold()}km radius`);
+            }
             
         } catch (criticalErr) {
-            this.log(`❌ Critical Context Break: ${criticalErr.message}`);
+            this.log(`❌ Critical error: ${criticalErr.message}`);
         }
     }
 }

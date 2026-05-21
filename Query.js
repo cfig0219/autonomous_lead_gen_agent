@@ -15,6 +15,10 @@
  * - getGeminiPayload() - Format payload for Gemini API
  * - validateAPIConfiguration() - Check if APIs are ready to use
  * - getAPITimeouts() - Get timeout values for each API
+ * - calculateDistance() - Calculate distance between two coordinates (Haversine)
+ * - filterPlacesByDistance() - Filter results by distance radius
+ * - getLocationCoordinates() - Convert zip code to lat/lng
+ * - getMaxDistanceThreshold() - Get max distance setting
  * 
  * ═══════════════════════════════════════════════════════════════════════════
  */
@@ -133,6 +137,159 @@ export class Query {
             placeId: placeId,
             fields: ['name', 'formatted_address', 'formatted_phone_number', 'website', 'geometry']
         };
+    }
+
+    // --- DISTANCE FILTERING ---
+    /**
+     * Calculate distance between two geographic coordinates using Haversine formula
+     * Accurate for Earth's curvature
+     * @param {number} lat1 - Latitude of first point
+     * @param {number} lng1 - Longitude of first point
+     * @param {number} lat2 - Latitude of second point
+     * @param {number} lng2 - Longitude of second point
+     * @returns {number} Distance in kilometers
+     */
+    calculateDistance(lat1, lng1, lat2, lng2) {
+        const R = 6371; // Earth's radius in kilometers
+        
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLng = (lng2 - lng1) * Math.PI / 180;
+        
+        const a = 
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLng / 2) * Math.sin(dLng / 2);
+        
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const distance = R * c;
+        
+        return distance;
+    }
+
+    /**
+     * Filter place results by distance from central location
+     * Removes any places more than maxDistanceKm away from center
+     * @param {Array} places - Array of place objects from Google Places API
+     * @param {number} centerLat - Latitude of central location (zip code center)
+     * @param {number} centerLng - Longitude of central location (zip code center)
+     * @param {number} maxDistanceKm - Maximum allowed distance in kilometers (default: 80)
+     * @returns {Object} { filtered: [places], removed: [places], distances: {place_id: distance} }
+     */
+    filterPlacesByDistance(places, centerLat, centerLng, maxDistanceKm = 80) {
+        if (!places || places.length === 0) {
+            return { filtered: [], removed: [], distances: {} };
+        }
+
+        if (!centerLat || !centerLng) {
+            throw new Error("Center latitude and longitude are required for distance filtering");
+        }
+
+        const filtered = [];
+        const removed = [];
+        const distances = {};
+
+        places.forEach(place => {
+            // Get coordinates from place object
+            let lat, lng;
+
+            if (place.geometry && place.geometry.location) {
+                if (typeof place.geometry.location.lat === 'function') {
+                    // Old API format: lat() and lng() are functions
+                    lat = place.geometry.location.lat();
+                    lng = place.geometry.location.lng();
+                } else if (place.geometry.location.lat !== undefined) {
+                    // New format: lat and lng are properties
+                    lat = place.geometry.location.lat;
+                    lng = place.geometry.location.lng;
+                }
+            }
+
+            // If no geometry, try location property (for new Places library)
+            if (!lat || !lng) {
+                if (place.location) {
+                    lat = place.location.latitude;
+                    lng = place.location.longitude;
+                }
+            }
+
+            // If still no coordinates, skip this place
+            if (!lat || !lng) {
+                // No geometry data - include anyway (can't filter)
+                filtered.push(place);
+                distances[place.name || 'Unknown'] = 'N/A';
+                return;
+            }
+
+            // Calculate distance
+            const distance = this.calculateDistance(centerLat, centerLng, lat, lng);
+            distances[place.name || 'Unknown'] = distance.toFixed(2);
+
+            // Filter based on max distance
+            if (distance <= maxDistanceKm) {
+                // Keep a reference to the distance for UI display
+                place.distanceFromCenter = distance;
+                filtered.push(place);
+            } else {
+                // Track removed places for logging
+                removed.push({
+                    name: place.name || 'Unknown',
+                    distance: distance,
+                    reason: `Outside ${maxDistanceKm}km radius`
+                });
+            }
+        });
+
+        return {
+            filtered: filtered,
+            removed: removed,
+            distances: distances
+        };
+    }
+
+    /**
+     * Get the geographic center coordinates of a given location
+     * Uses Google Geocoder to convert zip code to coordinates
+     * @param {string} location - Zip code or location string
+     * @returns {Promise<Object>} { lat: number, lng: number, formattedAddress: string }
+     */
+    async getLocationCoordinates(location) {
+        return new Promise((resolve, reject) => {
+            try {
+                if (!window.google || !window.google.maps) {
+                    reject('Google Maps not loaded');
+                    return;
+                }
+
+                const geocoder = new google.maps.Geocoder();
+                
+                geocoder.geocode({ address: location }, (results, status) => {
+                    if (status === 'OK' && results && results.length > 0) {
+                        const locObj = results[0].geometry.location;
+                        const lat = typeof locObj.lat === 'function' ? locObj.lat() : locObj.lat;
+                        const lng = typeof locObj.lng === 'function' ? locObj.lng() : locObj.lng;
+                        
+                        resolve({
+                            lat: lat,
+                            lng: lng,
+                            formattedAddress: results[0].formatted_address
+                        });
+                    } else {
+                        reject(`Geocoding failed for "${location}": ${status}`);
+                    }
+                });
+            } catch (err) {
+                reject(`Error geocoding location: ${err.message}`);
+            }
+        });
+    }
+
+    /**
+     * Get the maximum distance threshold for filtering
+     * Centralized configuration - easy to modify
+     * @returns {number} Maximum distance in kilometers
+     */
+    getMaxDistanceThreshold() {
+        return 80; // kilometers - CHANGE THIS VALUE TO ADJUST RADIUS
     }
 
     // --- GEMINI PROMPT GENERATION ---

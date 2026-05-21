@@ -160,11 +160,18 @@
          * * @param {Array<Object>} leads - An array of parsed lead records containing structured properties like name, phone, website, and address.
          */
         function exportInstanceToCSV(leads) {
+            // 1. Prompt the user for a filename
+            const userInput = prompt("Enter a filename for your export:", "maps_agent_leads.csv");
             
-            // 1. Initialize the CSV text content WITHOUT the data URI prefix
+            // If the user cancels the prompt, exit the function
+            if (userInput === null) return;
+        
+            // Ensure the file ends with .csv
+            const fileName = userInput.endsWith('.csv') ? userInput : `${userInput}.csv`;
+        
+            // 2. Initialize the CSV text content
             let csvContent = "Company Name,Phone,Website,Address\n";
             
-            // Loop through gathered elements to build compliant comma-separated strings
             leads.forEach(lead => {
                 const row = [
                     `"${(lead.name || '').replace(/"/g, '""')}"`,
@@ -172,33 +179,19 @@
                     `"${lead.website || ''}"`,
                     `"${(lead.address || '').replace(/"/g, '""')}"`
                 ].join(",");
-                
                 csvContent += row + "\n";
             });
             
-            // 2. Create a Blob from the raw CSV string data
+            // 3. Create and trigger download
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            
-            // 3. Generate a temporary Object URL representing the Blob data
             const url = URL.createObjectURL(blob);
-            
-            // 4. Create an invisible anchor tag to trigger the browser download mechanics
             const link = document.createElement("a");
             
-            // Assign Object URL resource onto the element
             link.setAttribute("href", url);
-            link.setAttribute("download", "maps_agent_leads.csv");
-            
-            // Stitches element context into view frame tree structure so browser can recognize validity
+            link.setAttribute("download", fileName); // Use the custom name here
             document.body.appendChild(link);
-            
-            // Programmatically fires native OS system download process
             link.click();
-            
-            // Garbage Collection: Clears the temporary element context structure straight out of active DOM footprint
             document.body.removeChild(link);
-            
-            // Revoke the Object URL to free up browser memory allocations
             URL.revokeObjectURL(url);
         }
     </script>
