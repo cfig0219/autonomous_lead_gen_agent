@@ -15,7 +15,7 @@ Before running this program, you must have:
 ### 2. **Google Places API Key**
    - Go to [Google Cloud Console](https://console.cloud.google.com/)
    - Create a new project
-   - Enable: **Google Places API** and **Maps JavaScript API**
+   - Enable: **Google Places API**, **Maps JavaScript API**, and **Geocoding API**
    - Create an API key under Credentials
    - Copy the key for use in `config.js`
 
