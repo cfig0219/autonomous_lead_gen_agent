@@ -70,18 +70,25 @@ You should see the Autonomous Lead Gen Agent interface.
 ## 📁 File Structure & Roles
 
 ### **1. `index.html`** - User Interface & Entry Point
-**Role:** The frontend interface that collects user input and displays results
+**Role:** The frontend interface that collects user input, displays results, and hosts both tools.
 
-**What it does:**
+**Section 1 — Autonomous lead gen agent:**
 - Provides input fields for location (zip code) and search queries
 - Displays a real-time execution log (green terminal-style console)
 - Shows results in an interactive HTML table
 - Enables CSV export of compiled leads
 
+**Section 2 — CSV lead file merger *(new)*:**
+- Drag-and-drop or click-to-browse upload zone; accepts multiple `.csv` files simultaneously
+- Deduplication mode toggle — match on name *or* phone (recommended) vs. name only
+- Merge execution log, stats bar (files loaded / raw records / duplicates removed / unique leads), and results table
+- Export button for the deduplicated merged output; enabled only after a successful run
+- Imports `Merging.js` in its own `<script type="module">` block, isolated from the agent script
+
 ---
 
 ### **2. `Search.js`** - Orchestration & API Coordination
-**Role:** Main orchestration engine that validates input and coordinates all API calls
+**Role:** Main orchestration engine that validates input and coordinates all API calls.
 
 **What it does:**
 - Validates API keys are configured
@@ -92,15 +99,36 @@ You should see the Autonomous Lead Gen Agent interface.
 - Handles all errors gracefully (never crashes)
 
 **Data Validation:**
-- Checks API keys are configured (not 'NOT_SET')
+- Checks API keys are configured (not `'NOT_SET'`)
 - Verifies location and queries are provided
 - Validates Google Maps SDK loaded successfully
 - Continues processing even if one query fails
 
 ---
 
-### **3. `Query.js`** - Query Formatting & API Configuration
-**Role:** Handles all query formatting and provides centralized API configuration
+### **3. `Merging.js`** - CSV Merge & Deduplication *(new)*
+**Role:** Accepts multiple uploaded `.csv` lead files, parses them, deduplicates across all sources, and exposes the merged result for rendering and export.
+
+**What it does:**
+- Parses CSV files with full RFC-4180 support — handles quoted fields, embedded commas, and Windows line endings
+- Auto-detects column positions from headers; compatible with minor header variations across export runs
+- Deduplication uses a two-key strategy: normalized company name *and* phone number (digits-only)
+- Name normalization strips punctuation, casing, and common legal suffixes (`LLC`, `Inc`, `Corp`, `Ltd`, etc.) before comparison
+- Renders merged results directly into the UI table and stats bar
+- Exports the deduplicated output as a `.csv` in the same format produced by the lead gen agent
+
+**Public methods:**
+- `loadFiles(fileList)` — entry point; orchestrates read → parse → merge → render
+- `parseCSV(text)` — converts a raw CSV string into an array of record objects
+- `normalizeName(name)` — produces a canonical key for name comparison
+- `mergeAndDeduplicate(allRecords)` — core dedup logic; returns the unique records array
+- `exportToCSV(records)` — triggers a browser download of the merged output
+- `getStats()` — returns run statistics: files loaded, raw count, duplicates removed, final count
+
+---
+
+### **4. `Query.js`** - Query Formatting & API Configuration
+**Role:** Handles all query formatting and provides centralized API configuration.
 
 **What it does:**
 - Formats user queries into Google Places API request format
@@ -111,8 +139,8 @@ You should see the Autonomous Lead Gen Agent interface.
 
 ---
 
-### **4. `config.js`** - API Keys & Configuration
-**Role:** Stores API keys and secrets (user must configure)
+### **5. `config.js`** - API Keys & Configuration
+**Role:** Stores API keys and secrets (user must configure).
 
 **What it contains:**
 ```javascript
