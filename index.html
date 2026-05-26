@@ -65,10 +65,33 @@
             background: #eef3fc;
             border: 1px solid #c5d3ea;
             border-radius: 4px;
-            padding: 0.15rem 0.55rem;
+            padding: 0.25rem 0.55rem;
             font-size: 0.78rem;
             color: #3273dc;
             font-family: monospace;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .file-chip button {
+            background: none;
+            border: none;
+            color: #3273dc;
+            cursor: pointer;
+            padding: 0;
+            font-size: 12px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            transition: background-color 0.15s, color 0.15s;
+        }
+        .file-chip button:hover {
+            background-color: rgba(50, 115, 220, 0.1);
+            color: #185fa5;
         }
     </style>
 </head>
@@ -388,14 +411,16 @@
         // Constructor receives IDs of the console, table body, and stats bar
         const merger = new Merging('mergeConsole', 'mergeTableBody', 'mergeStats');
 
-        // Tracks the FileList from the most recent selection for use on merge click
-        let stagedFiles = null;
+        // Tracks accumulated staged files across multiple selections/drags
+        let stagedFiles = [];
 
         // ── File Input: click-to-browse ─────────────────────────────────
         dropZone.addEventListener('click', () => fileInput.click());
 
         fileInput.addEventListener('change', () => {
             stageFiles(fileInput.files);
+            // Reset the input so selecting the same file again triggers change event
+            fileInput.value = '';
         });
 
         // ── File Input: drag-and-drop ───────────────────────────────────
@@ -415,27 +440,83 @@
         });
 
         /**
-         * Accepts a FileList, filters to .csv only, renders name chips,
-         * and enables the Merge button if at least one valid file is present.
+         * Accumulates CSV files to the staged queue.
+         * Each call adds new files instead of replacing the queue.
+         * Files are deduplicated by name to prevent accidental doubles.
          * @param {FileList} files
          */
         function stageFiles(files) {
             const csvFiles = Array.from(files).filter(f => f.name.toLowerCase().endsWith('.csv'));
 
             if (csvFiles.length === 0) {
-                fileChips.innerHTML = '<span class="file-chip" style="color:#cc3333;">⚠️ No .csv files detected</span>';
-                mergeBtn.disabled = true;
-                stagedFiles = null;
+                if (stagedFiles.length === 0) {
+                    fileChips.innerHTML = '<span class="file-chip" style="color:#cc3333;">⚠️ No .csv files detected</span>';
+                    mergeBtn.disabled = true;
+                }
                 return;
             }
 
-            // Render one chip per file
-            fileChips.innerHTML = csvFiles
-                .map(f => `<span class="file-chip">📄 ${f.name}</span>`)
+            // Add new files to the queue, avoiding duplicates by filename
+            const existingNames = new Set(stagedFiles.map(f => f.name));
+            csvFiles.forEach(file => {
+                if (!existingNames.has(file.name)) {
+                    stagedFiles.push(file);
+                }
+            });
+
+            // Render all staged files as chips with individual delete buttons
+            renderFileChips();
+            mergeBtn.disabled = false;
+        }
+
+        /**
+         * Re-renders the file chips display.
+         * Called both after adding files and after removing a file.
+         */
+        function renderFileChips() {
+            if (stagedFiles.length === 0) {
+                fileChips.innerHTML = '';
+                mergeBtn.disabled = true;
+                return;
+            }
+
+            fileChips.innerHTML = stagedFiles
+                .map((f, idx) => `
+                    <div class="file-chip" style="display: inline-flex; align-items: center; gap: 6px;">
+                        📄 ${f.name}
+                        <button 
+                            type="button"
+                            data-index="${idx}"
+                            class="file-chip-delete"
+                            style="background: none; border: none; color: inherit; cursor: pointer; padding: 0; font-size: 14px; margin-left: 2px;"
+                            title="Remove this file">
+                            ✕
+                        </button>
+                    </div>
+                `)
                 .join('');
 
-            mergeBtn.disabled = false;
-            stagedFiles = csvFiles; // Store as plain Array (FileList is read-only)
+            // Attach click handlers to all delete buttons
+            document.querySelectorAll('.file-chip-delete').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const index = parseInt(btn.dataset.index, 10);
+                    removeFile(index);
+                });
+            });
+        }
+
+        /**
+         * Removes a file from the staged queue by index.
+         * Updates the chip display and disables merge button if queue becomes empty.
+         * @param {number} index
+         */
+        function removeFile(index) {
+            if (index >= 0 && index < stagedFiles.length) {
+                stagedFiles.splice(index, 1);
+                renderFileChips();
+            }
         }
 
         // ── Merge Button ────────────────────────────────────────────────
