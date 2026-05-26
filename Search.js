@@ -231,64 +231,81 @@ export class Search {
     }
 
     // --- DEDUPLICATION & FILTERING ---
-    processAndDeduplicate(newLeads) {
-        const shouldFilter = document.getElementById('filterDuplicates').checked;
+        processAndDeduplicate(newLeads) {
+            const shouldFilter = document.getElementById('filterDuplicates').checked;
+            if (!shouldFilter) return newLeads;
         
-        // If filtering is off, just pass the raw array straight through
-        if (!shouldFilter) return newLeads;
-    
-        // Build a unique tracking set using existing items in our global storage array
-        const existingAddresses = new Set(
-            this.globalLeadsCollection.map(lead => lead.address?.toLowerCase().trim())
-        );
-        const existingNames = new Set(
-            this.globalLeadsCollection.map(lead => lead.name?.toLowerCase().trim())
-        );
-    
-        return newLeads.filter(lead => {
-            // Normalize values to prevent whitespace or capitalization bypasses
-            const cleanName = lead.name?.toLowerCase().trim();
-            const cleanAddress = lead.address?.toLowerCase().trim();
-    
-            // ❌ CRITICAL TRAP: If name AND address match an entry we already captured, dump it.
-            if (existingNames.has(cleanName) && existingAddresses.has(cleanAddress)) {
-                return false;
-            }
-    
-            // If the location matches exactly, it's a duplicate entry or overlapping workspace
-            if (cleanAddress && existingAddresses.has(cleanAddress)) {
-                return false;
-            }
-    
-            // Add to our runtime sets so we catch internal duplicates within the current batch
-            if (cleanName) existingNames.add(cleanName);
-            if (cleanAddress) existingAddresses.add(cleanAddress);
+            // 1. Seed our trackers with whatever is already saved historically
+            const existingAddresses = new Set(
+                this.globalLeadsCollection.map(lead => {
+                    const addr = lead.address || lead.Address || lead.companyAddress || lead.formattedAddress || '';
+                    return addr.toLowerCase().trim();
+                }).filter(Boolean)
+            );
             
-            return true;
-        });
-    }
-
-    // --- UI RENDERING ---
-    renderTable() {
-        const tbody = document.querySelector('#resultsTable tbody');
-        tbody.innerHTML = '';
+            const existingNames = new Set(
+                this.globalLeadsCollection.map(lead => {
+                    const name = lead.name || lead.Name || lead.companyName || lead['Company Name'] || '';
+                    return name.toLowerCase().trim();
+                }).filter(Boolean)
+            );
         
-        if (this.globalLeadsCollection.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="4" class="has-text-centered">No data.</td></tr>`;
-            return;
+            // 2. Filter the incoming loop, updating our tracking sets as we go
+            return newLeads.filter(lead => {
+                const rawName = lead.name || lead.Name || lead.companyName || lead['Company Name'] || '';
+                const rawAddress = lead.address || lead.Address || lead.companyAddress || lead.formattedAddress || '';
+    
+                const cleanName = rawName.toLowerCase().trim();
+                const cleanAddress = rawAddress.toLowerCase().trim();
+        
+                if (!cleanName && !cleanAddress) return true;
+    
+                // Check against historical database AND current loop's discovered duplicates
+                if (cleanName && existingNames.has(cleanName)) {
+                    return false; 
+                }
+                if (cleanAddress && existingAddresses.has(cleanAddress)) {
+                    return false;
+                }
+        
+                // Add to tracking sets immediately so the next item in this exact batch can check against it
+                if (cleanName) existingNames.add(cleanName);
+                if (cleanAddress) existingAddresses.add(cleanAddress);
+                
+                return true;
+            });
         }
 
-        this.globalLeadsCollection.forEach(lead => {
-            tbody.innerHTML += `
-                <tr>
-                    <td><strong>${lead.name || 'N/A'}</strong></td>
-                    <td>${lead.phone || 'N/A'}</td>
-                    <td>${lead.website ? `<a href="${lead.website}" target="_blank">Link</a>` : 'N/A'}</td>
-                    <td><small>${lead.address || 'N/A'}</small></td>
-                </tr>
-            `;
-        });
-    }
+    // --- UI RENDERING ---
+        renderTable() {
+            const tbody = document.querySelector('#resultsTable tbody');
+            if (!tbody) return;
+            
+            // 🚨 CRITICAL FIX: Clear out the table body first so we don't duplicate rows on subsequent query loops
+            tbody.innerHTML = '';
+            
+            if (this.globalLeadsCollection.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="4" class="has-text-centered">No data.</td></tr>`;
+                return;
+            }
+    
+            this.globalLeadsCollection.forEach(lead => {
+                // Safely map keys regardless of casing from Gemini
+                const name = lead.name || lead.Name || lead.companyName || lead['Company Name'] || 'N/A';
+                const phone = lead.phone || lead.Phone || lead.phoneNumber || 'N/A';
+                const website = lead.website || lead.Website || lead.websiteURI || null;
+                const address = lead.address || lead.Address || lead.formattedAddress || 'N/A';
+    
+                tbody.innerHTML += `
+                    <tr>
+                        <td><strong>${name}</strong></td>
+                        <td>${phone}</td>
+                        <td>${website ? `<a href="${website}" target="_blank">Link</a>` : 'N/A'}</td>
+                        <td><small>${address}</small></td>
+                    </tr>
+                `;
+            });
+        }
 
     // --- MAIN ORCHESTRATION ---
     async init() {
